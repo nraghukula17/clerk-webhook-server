@@ -1,75 +1,69 @@
-import express from 'express';
-import { Webhook as SvixWebhook } from 'svix';
-import { Clerk } from '@clerk/clerk-sdk-node';
+// src/webhooks/clerkWebhook.ts
+
+import express, { Request, Response } from "express";
+import { Webhook } from "svix";
+import { Clerk, WebhookEvent } from "@clerk/backend";
 
 const router = express.Router();
 
-// ✅ Explicitly initialize Clerk client with your DEV secret key
-const clerkClient = Clerk({
+// Initialize Clerk backend client (must have CLERK_SECRET_KEY in env)
+const clerk = Clerk({
   secretKey: process.env.CLERK_SECRET_KEY!,
 });
 
-router.post('/clerk-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  console.log('📬 Incoming webhook received');
+const CLERK_WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
+if (!CLERK_WEBHOOK_SECRET) {
+  console.error("❌ Missing CLERK_WEBHOOK_SECRET in env vars");
+}
 
-  const payload = req.body;
-  const headers = req.headers;
-
-  const webhookSecret = process.env.CLERK_WEBHOOK_SECRET;
-  if (!webhookSecret) {
-    console.error("❌ Missing CLERK_WEBHOOK_SECRET env var");
-    return res.status(500).send("Server misconfiguration");
-  }
-
-  const svixId = headers['svix-id'] as string | undefined;
-  const svixTimestamp = headers['svix-timestamp'] as string | undefined;
-  const svixSignature = headers['svix-signature'] as string | undefined;
-
-  if (!svixId || !svixTimestamp || !svixSignature) {
-    console.error("❗️ Missing Svix headers", { svixId, svixTimestamp, svixSignature });
-    return res.status(400).send("Missing Svix headers");
-  }
-
-  let evt: any;
-
-  try {
-    const wh = new SvixWebhook(webhookSecret);
-    evt = wh.verify(payload, {
-      'svix-id': svixId,
-      'svix-timestamp': svixTimestamp,
-      'svix-signature': svixSignature,
-    });
-
-    console.log("✅ Webhook verified:", evt.type);
-  } catch (err) {
-    console.error("❌ Webhook verification failed:", err);
-    return res.status(400).send("Invalid signature");
-  }
-
-  if (evt?.type === 'user.created') {
-    const userId = evt.data?.id;
-    console.log("📥 Received user.created for user ID:", userId);
-
-    if (!userId) {
-      return res.status(400).send("User ID missing in event");
+function normalizeHeaders(
+  headers: Record<string, string | string[] | undefined>
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (Array.isArray(value)) {
+      out[key] = value.join(",");
+    } else if (value !== undefined) {
+      out[key] = value;
     }
+  }
+  return out;
+}
 
+router.post(
+  "/webhooks/clerk",
+  express.raw({ type: "application/json" }),
+  async (req: Request, res: Response) => {
     try {
-      await clerkClient.users.updateUserMetadata(userId, {
-        publicMetadata: {
-          role: 'student',
-        },
-      });
-      console.log(`✅ Role "student" assigned to user ${userId}`);
-    } catch (err) {
-      console.error("❌ Failed to update Clerk user metadata:", err);
-      return res.status(500).send("Failed to update user metadata");
-    }
-  } else {
-    console.log(`ℹ️ Ignored event type: ${evt?.type}`);
-  }
+      if (!CLERK_WEBHOOK_SECRET) {
+        return res.status(500).json({ error: "Missing Clerk webhook secret" });
+      }
 
-  return res.status(200).json({ success: true });
-});
+      const payload = req.body.toString("utf8");
+      const headers = normalizeHeaders(req.headers);
+
+      const wh = new Webhook(CLERK_WEBHOOK_SECRET);
+      const evt = wh.verify(payload, headers) as WebhookEvent;
+
+      console.log("🔔 Clerk Webhook Received:", evt.type);
+
+      if (evt.type === "user.created") {
+        const userId = (evt.data as { id: string }).id;
+        console.log("👤 New Clerk user created:", userId);
+
+        await clerk.users.updateUser(userId, {
+          publicMetadata: { role: "student" },
+        });
+
+        console.log("✅ Assigned role 'student' to", userId);
+      }
+
+      res.status(200).json({ success: true });
+    } catch (err) {
+      console.error("❌ Clerk webhook error:", err);
+      res.status(400).json({ error: "Invalid webhook" });
+    }
+  }
+);
 
 export default router;
