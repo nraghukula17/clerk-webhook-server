@@ -1,10 +1,14 @@
 import express, { Request, Response } from "express";
 import { Webhook } from "svix";
 import { WebhookEvent } from "@clerk/backend";
+import { createClerkClient } from "@clerk/backend";
 
 const router = express.Router();
 
 const CLERK_WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET || "";
+const CLERK_SECRET_KEY = process.env.CLERK_SECRET_KEY || "";
+
+const clerkClient = createClerkClient({ secretKey: CLERK_SECRET_KEY });
 
 function normalizeHeaders(
   headers: Record<string, string | string[] | undefined>
@@ -32,7 +36,18 @@ const handler = async (req: Request, res: Response) => {
 
     if (evt.type === "user.created") {
       const userId = (evt.data as any).id;
-      console.log("New user created:", userId);
+      console.log("👤 New user created:", userId);
+
+      try {
+        await clerkClient.users.updateUserMetadata(userId, {
+          publicMetadata: {
+            role: "student",
+          },
+        });
+        console.log("✅ Assigned role 'student' to", userId);
+      } catch (error) {
+        console.error("❌ Failed to update user metadata:", error);
+      }
     }
 
     res.status(200).json({ success: true });
