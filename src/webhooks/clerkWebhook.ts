@@ -2,13 +2,13 @@
 
 import express, { Request, Response } from "express";
 import { Webhook } from "svix";
-import { Clerk, WebhookEvent } from "@clerk/backend";
+import { createClerkClient, WebhookEvent } from "@clerk/backend";
 
 const router = express.Router();
 
-// Initialize Clerk backend client (must have CLERK_SECRET_KEY in env)
-const clerk = Clerk({
-  secretKey: process.env.CLERK_SECRET_KEY!,
+// Create Clerk client using the backend SDK
+const clerkClient = createClerkClient({
+  secretKey: process.env.CLERK_SECRET_KEY!
 });
 
 const CLERK_WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
@@ -16,6 +16,7 @@ if (!CLERK_WEBHOOK_SECRET) {
   console.error("❌ Missing CLERK_WEBHOOK_SECRET in env vars");
 }
 
+// Normalize headers for Svix verification
 function normalizeHeaders(
   headers: Record<string, string | string[] | undefined>
 ): Record<string, string> {
@@ -30,9 +31,10 @@ function normalizeHeaders(
   return out;
 }
 
+// Webhook route
 router.post(
   "/webhooks/clerk",
-  express.raw({ type: "application/json" }),
+  express.raw({ type: "application/json" }), // raw body required for svix
   async (req: Request, res: Response) => {
     try {
       if (!CLERK_WEBHOOK_SECRET) {
@@ -48,10 +50,10 @@ router.post(
       console.log("🔔 Clerk Webhook Received:", evt.type);
 
       if (evt.type === "user.created") {
-        const userId = (evt.data as { id: string }).id;
+        const userId = evt.data.id;
         console.log("👤 New Clerk user created:", userId);
 
-        await clerk.users.updateUser(userId, {
+        await clerkClient.users.updateUser(userId, {
           publicMetadata: { role: "student" },
         });
 
