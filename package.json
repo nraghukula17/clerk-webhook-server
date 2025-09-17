@@ -6,6 +6,7 @@
     "start": "ts-node src/index.ts"
   },
   "dependencies": {
+    "@clerk/clerk-sdk-node": "^4.17.2",
     "@notionhq/client": "^2.2.3",
     "body-parser": "^1.20.2",
     "dotenv": "^16.3.1",
